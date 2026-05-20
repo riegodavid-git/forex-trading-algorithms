@@ -1,0 +1,128 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © psyplo
+
+//@version=6
+indicator("Macros, Sessions, and Quarters - psyplo", "MSQ", overlay=false, max_boxes_count=500)
+
+// === Inputs ===
+windowMinutes = input.int(10, "Minutes Before/After Hour", minval=1, maxval=30)
+
+boxColor = input.color(color.new(#2195f3, 100), "Macro Box Color")
+borderColor = input.color(color.new(#000000, 0), "Macro Border Color")
+
+// Session Ribbon Box Colors
+asiaColor   = input.color(color.new(#FFD700, 100), "Asia Session Box Color")
+londonColor = input.color(color.new(#FF00FF, 100), "London Session Box Color")
+nyColor     = input.color(color.new(#00FF00, 100), "New York Session Box Color")
+asiaBorderColor   = input.color(color.new(#000000, 0), "Asia Session Border Color")
+londonBorderColor = input.color(color.new(#000000, 0), "London Session Border Color")
+nyBorderColor     = input.color(color.new(#000000, 0), "New York Session Border Color")
+
+// Customizable Quarter Colors
+quarterColor1 = input.color(color.new(#FFD700, 100), "Quarter 1 Box Color")
+quarterColor2 = input.color(color.new(#FFD700, 100), "Quarter 2 Box Color")
+quarterColor3 = input.color(color.new(#FFD700, 100), "Quarter 3 Box Color")
+quarterColor4 = input.color(color.new(#FFD700,100),  "Quarter 4 Box Color")
+quarterBorderColor1 = input.color(color.new(#000000, 0), "Quarter 1 Border Color")
+quarterBorderColor2 = input.color(color.new(#000000, 0), "Quarter 2 Border Color")
+quarterBorderColor3 = input.color(color.new(#000000, 0), "Quarter 3 Border Color")
+quarterBorderColor4 = input.color(color.new(#000000, 0),  "Quarter 4 Border Color")
+
+// === Macro Time Window Logic ===
+var box currentMacroBox = na
+var float sessionHigh = na
+var float sessionLow = na
+
+isInMacroWindow() =>
+    currentMinute = minute(time)
+    currentMinute < windowMinutes or currentMinute >= (60 - windowMinutes)
+
+inWindow = isInMacroWindow()
+newWindow = inWindow and not inWindow[1]
+
+if newWindow
+    sessionHigh := high
+    sessionLow := low
+    currentMacroBox := box.new(left=bar_index, right=bar_index, top=high, bottom=low, bgcolor=boxColor, border_color=borderColor, force_overlay = true)
+else if inWindow and not na(currentMacroBox)
+    sessionHigh := math.max(sessionHigh, high)
+    sessionLow := math.min(sessionLow, low)
+    box.set_top(currentMacroBox, sessionHigh)
+    box.set_bottom(currentMacroBox, sessionLow)
+    box.set_right(currentMacroBox, bar_index)
+
+windowEnded = not inWindow and inWindow[1]
+if windowEnded and not na(currentMacroBox)
+    box.set_right(currentMacroBox, bar_index)
+
+// === Session Ribbon as Fixed Boxes ===
+hourNow = hour(time, "Asia/Singapore")  // UTC+8
+
+asiaSession   = hourNow >= 6 and hourNow < 12
+londonSession = hourNow >= 12 and hourNow < 18
+nySession     = hourNow >= 18 and hourNow < 24
+sessionEnded  = hourNow == 0  // Reset at 12:00AM
+
+var box sessionRibbonBox = na
+var int sessionStartBar = na
+
+var box[] quarterBoxes = array.new<box>()
+var int quarterBars = math.round(90 / timeframe.multiplier)
+
+// Reset on new session
+if asiaSession and not asiaSession[1]
+    sessionRibbonBox := box.new(left=bar_index, right=bar_index, top=1, bottom=0, bgcolor=asiaColor, border_color=asiaBorderColor)
+    box.set_text(sessionRibbonBox, "Asia")
+    box.set_text_color(sessionRibbonBox, color.black)
+    box.set_text_size(sessionRibbonBox, size.normal)
+    box.set_text_halign(sessionRibbonBox, text.align_center)
+    box.set_text_valign(sessionRibbonBox, text.align_center)
+    sessionStartBar := bar_index
+    array.clear(quarterBoxes)
+else if londonSession and not londonSession[1]
+    sessionRibbonBox := box.new(left=bar_index, right=bar_index, top=1, bottom=0, bgcolor=londonColor, border_color=londonBorderColor)
+    box.set_text(sessionRibbonBox, "London")
+    box.set_text_color(sessionRibbonBox, color.black)
+    box.set_text_size(sessionRibbonBox, size.normal)
+    box.set_text_halign(sessionRibbonBox, text.align_center)
+    box.set_text_valign(sessionRibbonBox, text.align_center)
+    sessionStartBar := bar_index
+    array.clear(quarterBoxes)
+else if nySession and not nySession[1]
+    sessionRibbonBox := box.new(left=bar_index, right=bar_index, top=1, bottom=0, bgcolor=nyColor, border_color=nyBorderColor)
+    box.set_text(sessionRibbonBox, "New York")
+    box.set_text_color(sessionRibbonBox, color.black)
+    box.set_text_size(sessionRibbonBox, size.normal)
+    box.set_text_halign(sessionRibbonBox, text.align_center)
+    box.set_text_valign(sessionRibbonBox, text.align_center)
+    sessionStartBar := bar_index
+    array.clear(quarterBoxes)
+
+if not na(sessionRibbonBox)
+    box.set_right(sessionRibbonBox, bar_index)
+
+if sessionEnded and not na(sessionRibbonBox)
+    box.set_right(sessionRibbonBox, bar_index)
+    sessionRibbonBox := na
+    sessionStartBar := na
+
+// --- Session Quarters Logic ---
+if not na(sessionStartBar)
+    quarterIndex = ((bar_index - sessionStartBar) / quarterBars)
+    quarterStep = math.floor(quarterIndex)
+
+    quarterColor = quarterStep == 0 ? quarterColor1 : quarterStep == 1 ? quarterColor2 : quarterStep == 2 ? quarterColor3 : quarterStep == 3 ? quarterColor4 : na
+
+    quarterBorder = quarterStep == 0 ? quarterBorderColor1 : quarterStep == 1 ? quarterBorderColor2 : quarterStep == 2 ? quarterBorderColor3 : quarterStep == 3 ? quarterBorderColor4 : na
+
+    if quarterStep < 4 and (array.size(quarterBoxes) <= quarterStep)
+        qBox = box.new(left=bar_index, right=bar_index, top=2, bottom=1, bgcolor=quarterColor, border_color=quarterBorder)
+        box.set_text(qBox, "Q" + str.tostring(quarterStep + 1))
+        box.set_text_color(qBox, color.black)
+        box.set_text_size(qBox, size.small)
+        box.set_text_halign(qBox, text.align_center)
+        box.set_text_valign(qBox, text.align_center)
+        array.push(quarterBoxes, qBox)
+    else if quarterStep < 4
+        qBox = array.get(quarterBoxes, quarterStep)
+        box.set_right(qBox, bar_index)

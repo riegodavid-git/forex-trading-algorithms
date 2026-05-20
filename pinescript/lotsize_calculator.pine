@@ -1,0 +1,151 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@version=5
+indicator("LotSize Calculator - psyplo", overlay=true)
+
+import TradingView/ta/6 as ta
+
+// Trade Sizing
+GRP1 = "Trade Sizing"
+sizeInput = input.float(50000.0, "Account Size ($)", tooltip="Total equity or capital you want to size positions from", group=GRP1)
+riskValueInput = input.float(1, "Risk % per Trade", tooltip="Percentage of account size you're willing to risk per trade", group=GRP1)
+currencyInput = input.string("Default", "Currency", options=["Default", "USD", "EUR", "CAD", "JPY", "GBP", "HKD", "CNY", "NZD", "RUB", "AUD", "CHF", "NOK", "SEK", "SGD", "TRY", "ZAR", "MYR", "KRW", "USDT", "INR"], tooltip="Base currency for your account or preferred risk unit", group=GRP1)
+lotSizeInput = input.float(100000.0, "Lot Size", minval=0.0001, tooltip="Number of units in one lot. Standard is 100,000 in Forex", group=GRP1)
+sizingMethod = input.string("Lots", "Sizing Method", options=["QTY", "Lots"], tooltip="Choose between raw quantity or lot-based sizing", group=GRP1)
+roundLots = input.bool(true, "Round Lots to 2 Decimals", tooltip="If true, rounds final lot size to 2 decimal places", group=GRP1)
+
+// Line Settings
+GRP2a = "Line Settings - Color Section"
+entryColor = input.color(color.rgb(63, 140, 255), "Entry Line Color", group=GRP2a)
+tpColor = input.color(color.green, "Take Profit Line Color", group=GRP2a)
+slColor = input.color(color.red, "Stop Loss Line Color", group=GRP2a)
+
+GRP2b = "Line Settings - Type and Thickness"
+lineStyle = input.string("dotted", "Line Type", options=["solid", "dotted", "dashed"], group=GRP2b)
+lineWidth = input.int(2, "Line Thickness", minval=1, maxval=4, group=GRP2b)
+
+GRP2c = "Line Settings - Show Section"
+showEntry = input.bool(true, "Show Entry Line", group=GRP2c)
+showTP = input.bool(true, "Show Take Profit Line", group=GRP2c)
+showSL = input.bool(true, "Show Stop Loss Line", group=GRP2c)
+
+// Table Settings
+GRP3a = "Table Settings - General"
+showTable = input.bool(true, "Show Info Table", tooltip="Displays position size and levels as a floating table", group=GRP3a)
+tablePosition = input.string("bottom_right", "Table Position", options=["top_left", "top_right", "bottom_left", "bottom_right"], tooltip="Corner to place the table on the chart", group=GRP3a)
+tableTextSize = input.string("normal", "Text Size", options=["tiny", "small", "normal", "large", "huge"], tooltip="Adjusts text scale inside the table", group=GRP3a)
+tableOpacity = input.int(80, "Table Opacity (0-100)", minval=0, maxval=100, tooltip="Transparency level of the table background", group=GRP3a)
+
+GRP3b = "Table Settings - Table Toggles"
+showRowEntry = input.bool(true, "Show Entry Price", group=GRP3b)
+showRowLots = input.bool(true, "Show Lots / Qty", group=GRP3b)
+showRowTP = input.bool(true, "Show Take Profit", group=GRP3b)
+showRowSL = input.bool(true, "Show Stop Loss", group=GRP3b)
+showRowRR = input.bool(true, "Show Risk-Reward", group=GRP3b)
+showRowProfit = input.bool(true, "Show Profit (Account CCY)", group=GRP3b)
+showRowRisk = input.bool(true, "Show Risk (Account CCY)", group=GRP3b)
+
+GRP3c = "Table Settings - Table Colors"
+entryTextColor = input.color(color.white, "Entry Text Color", group=GRP3c)
+lotTextColor = input.color(color.white, "Lots/Qty Text Color", group=GRP3c)
+tpTextColor = input.color(color.white, "TP Text Color", group=GRP3c)
+slTextColor = input.color(color.white, "SL Text Color", group=GRP3c)
+rrTextColor = input.color(color.white, "RR Text Color", group=GRP3c)
+profitTextColor = input.color(color.white, "Profit Text Color", group=GRP3c)
+riskTextColor = input.color(color.white, "Risk Text Color", group=GRP3c)
+
+// Entry & Trade Details
+GRP4 = "Trade Levels"
+entryPriceInput = input.price(0, "Entry Point", group=GRP4, confirm=true)
+inputSlPrice = input.price(0, "Stop Loss", group=GRP4, confirm=true)
+inputTpPrice = input.price(0, "Take Profit", group=GRP4, confirm=true)
+
+// Derived Variables
+entryPrice = math.round_to_mintick(entryPriceInput)
+tpPrice = math.round_to_mintick(inputTpPrice)
+slPrice = math.round_to_mintick(inputSlPrice)
+
+defineCurrency() => currencyInput == "Default" ? "" : currencyInput
+
+convertCurrency(price, currency) => (currency == "Default" or currency == "" or (syminfo.basecurrency == currency and not na(syminfo.basecurrency))) ? price : (request.security(syminfo.tickerid, timeframe.period, close, currency=currency, ignore_invalid_symbol=true) / close) * price
+
+calcRiskAmount(size) => size * riskValueInput * 0.01
+
+formatLots(lots) =>
+    rounded = math.round(lots * 100) / 100
+    str.tonumber(str.tostring(rounded))
+
+calcQty(riskAmount, lossSize) =>
+    floatContracts = syminfo.type == "crypto" or syminfo.type == "futures"
+    qty = floatContracts ? riskAmount / math.abs(lossSize) : math.floor(riskAmount / math.abs(lossSize))
+    lots = qty / lotSizeInput
+    lots := roundLots ? formatLots(lots) : lots
+    [qty, lots]
+
+if (slPrice > entryPrice and tpPrice > entryPrice) or (slPrice < entryPrice and tpPrice < entryPrice)
+    runtime.error("TP and SL must be on opposite sides of Entry Price")
+
+currency = defineCurrency()
+convertedEntryPrice = convertCurrency(entryPrice, currency)
+convertedTpPrice = convertCurrency(tpPrice, currency)
+convertedSlPrice = convertCurrency(slPrice, currency)
+
+profitSize = convertedTpPrice - convertedEntryPrice
+lossSize = convertedSlPrice - convertedEntryPrice
+riskAmount = calcRiskAmount(sizeInput)
+[qtyFull, lots] = calcQty(riskAmount, lossSize)
+qty = sizingMethod == "Lots" ? lots * lotSizeInput : qtyFull
+
+// Extra Calculations
+riskRewardRatio = math.abs(profitSize / lossSize)
+profitUSD = profitSize * qty
+riskUSD = math.abs(lossSize * qty)
+
+currencySymbol = currencyInput == "INR" ? "₹" : currencyInput == "USD" or currencyInput == "Default" ? "$" : currencyInput + " "
+
+// Draw Horizontal Lines
+var line entryLine = na
+var line tpLine = na
+var line slLine = na
+
+if not na(entryLine)
+    line.delete(entryLine)
+if not na(tpLine)
+    line.delete(tpLine)
+if not na(slLine)
+    line.delete(slLine)
+
+styleMap = lineStyle == "solid" ? line.style_solid : lineStyle == "dotted" ? line.style_dotted : line.style_dashed
+
+if showEntry
+    entryLine := line.new(x1=bar_index - 1, y1=entryPrice, x2=bar_index, y2=entryPrice, color=entryColor, width=lineWidth, style=styleMap, extend=extend.both)
+if showTP
+    tpLine := line.new(x1=bar_index - 1, y1=tpPrice, x2=bar_index, y2=tpPrice, color=tpColor, width=lineWidth, style=styleMap, extend=extend.both)
+if showSL
+    slLine := line.new(x1=bar_index - 1, y1=slPrice, x2=bar_index, y2=slPrice, color=slColor, width=lineWidth, style=styleMap, extend=extend.both)
+
+// Display Info Table with 2-column layout
+var table infoTable = table.new(position=tablePosition, columns=2, rows=7, border_width=1)
+
+if showTable
+    if showRowLots
+        table.cell(infoTable, 0, 0, "Lots / Qty", text_color=lotTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 0, sizingMethod == "Lots" ? str.tostring(lots) : str.tostring(qtyFull, "#.#####"), text_color=lotTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowEntry
+        table.cell(infoTable, 0, 1, "Entry", text_color=entryTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 1, str.tostring(entryPriceInput, "#.#####"), text_color=entryTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowTP
+        table.cell(infoTable, 0, 2, "TP", text_color=tpTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 2, str.tostring(inputTpPrice, "#.#####"), text_color=tpTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowSL
+        table.cell(infoTable, 0, 3, "SL", text_color=slTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 3, str.tostring(inputSlPrice, "#.#####"), text_color=slTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowProfit
+        table.cell(infoTable, 0, 4, "Profit", text_color=profitTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 4, currencySymbol + str.tostring(profitUSD, "#.##"), text_color=profitTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowRisk
+        table.cell(infoTable, 0, 5, "Risk", text_color=riskTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 5, currencySymbol + str.tostring(riskUSD, "#.##"), text_color=riskTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+    if showRowRR
+        table.cell(infoTable, 0, 6, "RR", text_color=rrTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity))
+        table.cell(infoTable, 1, 6, str.tostring(riskRewardRatio, "#.##"), text_color=rrTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity)), text_color=rrTextColor, text_size=tableTextSize, bgcolor=color.new(color.black, 100 - tableOpacity)

@@ -1,0 +1,162 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © psyplo
+
+//@version=6
+indicator(title = "TwoSweepsModel", shorttitle = "TSM", overlay = true, max_bars_back = 2000)
+
+//timeframe flags
+is5minChart = timeframe.isintraday and timeframe.multiplier == 5
+//is1minChart = timeframe.isintraday and timeframe.multiplier == 1
+
+// SFP DETECTION
+sfp_lookback = 1999
+
+//to detect pivot highs and lows
+pivot_length = input.int(defval = 3, title = "Pivot Length", group = "SFP Settings")
+pivot_high = ta.pivothigh(pivot_length, 0)
+pivot_low = ta.pivotlow(pivot_length, 0)
+
+//getting candle data
+f_get_candle(_index) => [open[_index], high[_index], low[_index], close[_index], bar_index[_index]]
+
+f_sfp() =>
+    if not barstate.isconfirmed
+        [false, na, na, false, na, na]
+    [co, ch, cl, cc, ci] = f_get_candle(0)
+
+//hsfp logic
+    hc1 = not na(pivot_high) //is current candle pivot high?
+    hc2 = false
+    hx = 0
+    hy = 0.0
+    max_price = high[1]
+
+    for i = 1 to sfp_lookback
+        [o, h, l, c, bi] = f_get_candle(i)
+        if h >= ch
+            break
+        if h < ch and h > math.max(co, cc) and not na(pivot_high[i]) and h > max_price
+            hc2 := true
+            hx := bar_index[i]
+            hy := h
+        if h > max_price
+            max_price := h
+    hsfp = hc1 and hc2
+
+//lsfp logic
+    lc1 = not na(pivot_low)
+    min_price = low[1]
+    lc2 = false
+    lx = 0
+    ly = 0.0
+    for i = 2 to sfp_lookback
+        [o, h, l, c, bi] = f_get_candle(i)
+        if l < cl
+            break
+        if cl < l and math.min(co, cc) > l and not na(pivot_low[i]) and l < min_price
+            lc2 := true
+            lx := bar_index[i]
+            ly := l
+        if l < min_price
+            min_price := l
+    lsfp = lc1 and lc2
+
+    [hsfp, hx, hy, lsfp, lx, ly]
+
+//control logic
+f_sfpcontrol(_tf) => request.security(syminfo.tickerid, _tf, f_sfp())
+
+[hsfp1h, hx1h, hy1h, lsfp1h, lx1h, ly1h] = f_sfpcontrol("60")
+[hsfp30m, hx30m, hy30m, lsfp30m, lx30m, ly30m] = f_sfpcontrol("30")
+
+//bgcolor(is5minChart and (hsfp1h or hsfp30m) ? color.new(color.red, 85) : na, offset = 1)
+//bgcolor(is5minChart and (lsfp1h or lsfp30m) ? color.new(color.green, 85) : na, offset = 1)
+
+// FVG DETECTION
+//user inputs
+ext = input.int(defval = 0, title = "Extend FVGs", group = "FVG Settings")
+upcolor = input.color(defval = #000000, title = "Bullish color", group = "FVG Style")
+downcolor = input.color(defval = #000000, title = "Bearish color", group = "FVG Style")
+inp1 = input.bool(false, "Volume Filter", group = "FVG Filters")
+inp2 = input.bool(false, "ATR Filter", group = "FVG Filters")
+inp3 = input.bool(false, "Trend Filter", group = "FVG Filters")
+
+textSize = input.string("large", title="IFVG Detection Text Size", options=["tiny", "small", "normal", "large", "huge"], group="IFVG Settings")
+textBuy = input.string("O", title="Bullish IFVG", group="IFVG Settings")
+textSell = input.string("X", title="Bearish IFVG", group="IFVG Settings")
+textOffset = input.int(40, title="Vertical Offset (ticks)", group="IFVG Settings")
+
+var float recentBullFVG_Low = na
+var float recentBearFVG_High = na
+var int bullFVG_start = na
+var int bearFVG_start = na
+var bool bullUsed = false
+var bool bearUsed = false
+
+f_fvg() =>
+    volfilt = inp1 ? volume[1] > ta.sma(volume, 9)*1.5 : true
+    atr = ta.atr(20) / 1.5
+    atrfilt = inp2 ? ((low - high[2] > atr) or (low[2] - high > atr)) : true
+    loc = ta.sma(close, 54)
+    loc2 = loc > loc[1]
+    locfiltb = inp3 ? loc2 : true
+    locfilts = inp3 ? not loc2 : true
+
+    bfvg = low > high[2] and volfilt and atrfilt and locfiltb
+    sfvg = high < low[2] and volfilt and atrfilt and locfilts
+
+    [bfvg, sfvg]
+
+//control logic
+f_fvgcontrol(_tf) => request.security(syminfo.tickerid, _tf, f_fvg())
+//5m
+[bfvg5m, sfvg5m] = f_fvgcontrol("5")
+//1m
+//[bfvg1m, sfvg1m] = f_fvgcontrol("1")
+
+//plotting FVGs
+if barstate.isconfirmed and bfvg5m and is5minChart
+    recentBullFVG_Low := high[2]
+    bullFVG_start := bar_index
+    box.new(left = bar_index-2, top = low, right = bar_index + ext, bottom = high[2], border_color = color.new(color.gray, 100), bgcolor = color.new(upcolor, 90))
+    bullUsed := false
+
+if barstate.isconfirmed and sfvg5m and is5minChart
+    recentBearFVG_High := low[2]
+    bearFVG_start := bar_index
+    box.new(left = bar_index-2, top = high, right = bar_index + ext, bottom = low[2], border_color = color.new(color.gray, 100), bgcolor = color.new(downcolor, 90))
+    bearUsed := false
+
+//if barstate.isconfirmed and bfvg1m and is1minChart
+    //recentBullFVG_Low := high[2]
+    //bullFVG_start := bar_index
+    //box.new(left = bar_index-2, top = low, right = bar_index + ext, bottom = high[2], border_color = color.new(color.gray, 100), bgcolor = color.new(upcolor, 90))
+    //bullUsed := false
+
+//if barstate.isconfirmed and sfvg1m and is1minChart
+    //recentBearFVG_High := low[2]
+    //bearFVG_start := bar_index
+    //box.new(left = bar_index-2, top = high, right = bar_index + ext, bottom = low[2], border_color = color.new(color.gray, 100), bgcolor = color.new(downcolor, 90))
+    //bearUsed := false
+
+//5min IFVG confirmation logic
+hsfpTrigger = hsfp1h or hsfp30m
+lsfpTrigger = lsfp1h or lsfp30m
+
+candleUnderBullFVG = barstate.isconfirmed and (hsfpTrigger or (hsfpTrigger[1] and hsfpTrigger)) and not na(recentBullFVG_Low) and close < recentBullFVG_Low and not bullUsed
+candleOverBearFVG = barstate.isconfirmed and (lsfpTrigger or (lsfpTrigger[1] and lsfpTrigger)) and not na(recentBearFVG_High) and close > recentBearFVG_High and not bearUsed
+
+if candleUnderBullFVG and is5minChart
+    bullUsed := true
+    var label sellText = na
+    alert("Sell Signal", alert.freq_once_per_bar_close)
+    sellText := label.new(bar_index, high + (textOffset * syminfo.mintick), textSell, style=label.style_none, textcolor=color.rgb(255, 255, 255, 40), size=textSize)
+if candleOverBearFVG and is5minChart
+    bearUsed := true 
+    var label buyText = na
+    alert("Buy Signal", alert.freq_once_per_bar_close)
+    buyText := label.new(bar_index, low - (1.5*(textOffset * syminfo.mintick)), textBuy, style=label.style_none, textcolor=color.rgb(255, 255, 255, 40), size=textSize)
+
+
+//plot (recentBearFVG_High, color = color.green, style = plot.style_linebr)
+//plot (recentBullFVG_Low,  color = color.red, style = plot.style_linebr)
