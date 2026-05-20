@@ -37,4 +37,4 @@ My **Time Series Analysis** course final project applies similar methodologies (
 
 ---
 
-**David Nathaniel P. Riego** · BS Data Science, UA&P (Aug 2023 – Aug 2027 expected) · [LinkedIn](https://linkedin.com/in/david-riego/)
+**David Nathaniel P. Riego** · BS Data Science, UA&P (Aug 2023 – Aug 2027 expected) · [LinkedIn](https://www.linkedin.com/in/david-riego-069251212/)
